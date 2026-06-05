@@ -1,0 +1,95 @@
+.\scripts\run_capsulorhexis.ps1
+
+============================================================
+白内障撕囊术仿真器 — 修改总清单
+项目路径: D:\1-TUM\Master_thesis\simulator\
+源码包:   scenes\capsulorhexis_modules\
+配置文件: assets\capsulorhexis_profile.json
+============================================================
+
+【总目标】
+组织有柔度/形变；达芬奇器械可局部剥离组织。
+做法：从"脚本动画"过渡到"FEM物理 + 镊子抓取拖动"。
+
+【工作约定】
+- 一次尽量只改一个 .py 文件，除非改动牵连其他文件。
+- 文件名一律用原名，用户自行备份原件（带 _old，且放在包外）。
+- 物理效果无法在 Claude 端验证，需用户在 SOFA 实机确认。
+
+------------------------------------------------------------
+新增的测试文件（放在 scenes\ 目录下，与 capsulorhexis_modules 同级）
+------------------------------------------------------------
+- test_harness.py   无SOFA回归测试：网格完整性+顶点校验和+控制器数学+PNG往返
+- baseline.json     黄金值快照（18表面/6曲线，9394顶点/17002三角形）
+  跑法：在 scenes\ 目录执行  python test_harness.py
+  结果 "OK: matches baseline exactly" 即无回归。
+
+------------------------------------------------------------
+已修改的源文件
+------------------------------------------------------------
+1) profile.py
+   - 删除 save_custom_profile 末尾不可达的 return profile（死代码）。
+
+2) controller.py（改动最多，物理逻辑都在这里）
+   a. _operator_hint：删除永不触发的 "CLOSE TIP" 分支（死代码）。
+   b. __init__：新增物理相关属性，从 profile.simulation 读取——
+      physics_flap(开关)、grab_handle_count、grab_radius、grab_curl，
+      以及抓取状态 _grab_handles/_grab_orig/_grab_weight/_grab_tool_anchor/
+      _grab_anchor0/_was_grasped。
+   c. _animate_flap：physics_flap=true 时直接 return（撕囊瓣交给FEM，不再脚本摆位）。
+   d. 类末尾新增物理方法：
+      onAnimateEndEvent  每帧求解后处理抓取
+      _live_flap_positions / _live_tool_positions  读实时顶点
+      _tool_anchor_position  抓取锚点=镊子真实尖端顶点（不是抽象控制点）
+      _pick_grab_handles  抓取时选锚点 grab_radius 半径内的瓣顶点，按距离赋权重
+      _pin_grab_handles   按权重渐变跟随镊子位移 + grab_curl 卷边（局部剥离，无尖刺）
+
+3) geometry.py
+   - add_generated_surface：新增可选参数 materials(dict)。
+     FEM三力场参数（质量/杨氏模量/泊松比/抗弯刚度/阻尼）改为从 materials 读取，
+     缺失则回退原写死默认值。
+
+4) scene.py
+   - 囊膜(anterior_capsule)与撕囊瓣(capsular_flap)创建时传入
+     materials=profile["materials"]，激活上面的组织柔度参数。
+   - 控制器实例化保持直接用 CapsulorhexisController（无独立物理文件）。
+
+5) assets\capsulorhexis_profile.json
+   - materials 段：把旧的无用键 capsule_* 改名为代码真正读取的 tissue_*，并补全：
+     tissue_young_modulus, tissue_poisson_ratio, tissue_mass,
+     tissue_bending_stiffness, tissue_bending_damping（保留原有 damping）。
+   - simulation 段新增：
+     physics_flap (true/false 开关), grab_handle_count, grab_radius, grab_curl。
+
+------------------------------------------------------------
+可调参数速查（都在 assets\capsulorhexis_profile.json）
+------------------------------------------------------------
+simulation.physics_flap        true=物理剥离版, false=旧脚本动画版
+simulation.grab_radius   1.2   掀起片大小，越大范围越广
+simulation.grab_curl     0.3   卷边强度，越大卷得越明显
+simulation.grab_handle_count 6 半径内无点时的回退抓取点数
+materials.tissue_young_modulus 650  组织软硬，越小越软（如200更软）
+materials.tissue_bending_stiffness 0.08 抗弯，越小越易卷边
+materials.damping        0.18  速度阻尼
+
+------------------------------------------------------------
+踩过的坑（避免重犯）
+------------------------------------------------------------
+- 循环导入：曾因把物理逻辑放独立文件 controller_physics.py 顶部
+  import controller 导致；最终方案是合并进 controller.py 单文件，无跨文件导入。
+- 文件名搞混：曾把小的物理文件误覆盖成 controller.py（53KB→5KB），
+  从 modules_old 备份找回。务必确认 controller.py 是完整大文件(约1374行)。
+- 改完务必删 scenes\capsulorhexis_modules\__pycache__。
+- _old 备份文件不要放在 capsulorhexis_modules\ 包内，要放包外。
+- JSON 改动注意逗号：花括号前最后一项无逗号，其余项末尾要有逗号。
+- 键盘不动：是中文输入法抢键，切英文即可，非代码问题。
+
+------------------------------------------------------------
+当前进度 / 下一步
+------------------------------------------------------------
+已完成：组织FEM柔度可调；物理抓取跟随镊子真实尖端；局部加权剥离+卷边（消尖刺）。
+未完成（下一步，最难）：参考图中"清晰的分离缝/真正撕开"。
+  计划方案 B'：在 geometry.py 的 generate_flap_disk 沿撕裂路径预切一条缝
+  （缝两侧顶点不共用），使膜能沿缝真正分离；controller 配合。
+  风险高、无法Claude端验证、需用户大量实机调试。
+============================================================

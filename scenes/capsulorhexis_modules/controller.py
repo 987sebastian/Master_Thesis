@@ -137,6 +137,7 @@ class CapsulorhexisController(Sofa.Core.Controller if Sofa else object):
         traction_line_node=None,
         traction_line_visual=None,
         view_settings=None,
+        flap_seam_lips=None,
         name="capsulorhexis_controller",
     ):
         if Sofa:
@@ -181,6 +182,23 @@ class CapsulorhexisController(Sofa.Core.Controller if Sofa else object):
         self.grab_handle_count = int(simulation.get("grab_handle_count", 6))
         self.grab_radius = float(simulation.get("grab_radius", 1.2))
         self.grab_curl = float(simulation.get("grab_curl", 0.3))
+        # Max stretch before the tissue slips out of the forceps (plan B'
+        # precursor to a real tear). 0 disables the cap -> unchanged behaviour.
+        self.grab_max_stretch = float(simulation.get("grab_max_stretch", 0.0))
+        self._grab_slipped = False
+        # Pre-cut radial seam (plan B'): when scene.py supplies the two lip
+        # vertex index lists, the grab will lift only the anchor's lip so the
+        # slit opens. Disabled (None) -> grab behaves exactly as before.
+        self.flap_seam = bool(simulation.get("flap_seam", False)) and bool(flap_seam_lips)
+        if flap_seam_lips:
+            self._seam_lip_a = set(int(i) for i in flap_seam_lips[0])
+            self._seam_lip_b = set(int(i) for i in flap_seam_lips[1])
+        else:
+            self._seam_lip_a = set()
+            self._seam_lip_b = set()
+        self.flap_seam_angle = math.radians(
+            float(simulation.get("flap_seam_angle_degrees", simulation.get("tear_start_angle_degrees", -105.0)))
+        )
         self._grab_handles = []
         self._grab_orig = []
         self._grab_weight = []
@@ -1128,6 +1146,15 @@ class CapsulorhexisController(Sofa.Core.Controller if Sofa else object):
             delta -= 1.0
         return delta
 
+    def _seam_signed_angle(self, angle):
+        """Wrap (angle - seam_angle) into (-pi, pi]; sign picks the slit side."""
+        delta = angle - self.flap_seam_angle
+        while delta <= -math.pi:
+            delta += 2.0 * math.pi
+        while delta > math.pi:
+            delta -= 2.0 * math.pi
+        return delta
+
     def _animate_flap(self):
         if self.physics_flap:
             return  # flap is owned by the FEM solver; do not script its vertices
@@ -1241,6 +1268,7 @@ class CapsulorhexisController(Sofa.Core.Controller if Sofa else object):
             self._grab_weight = []
             self._grab_tool_anchor = None
             self._grab_anchor0 = None
+            self._grab_slipped = False
         self._was_grasped = grasped
         if grasped and self._grab_handles:
             self._pin_grab_handles()
@@ -1304,6 +1332,24 @@ class CapsulorhexisController(Sofa.Core.Controller if Sofa else object):
         anchor = self._tool_anchor_position()
         self._grab_anchor0 = list(anchor)
 
+        # When a radial seam is present, restrict the grab to the lip on the
+        # anchor's side of the slit so dragging opens a real separation seam
+        # instead of pinning both coincident lips together.
+        seam_keep = None
+        if self.flap_seam:
+            anchor_angle = math.atan2(anchor[1], anchor[0])
+            anchor_side = self._seam_signed_angle(anchor_angle) >= 0.0
+            own_lip = self._seam_lip_a if anchor_side else self._seam_lip_b
+            opp_lip = self._seam_lip_b if anchor_side else self._seam_lip_a
+
+            def seam_keep(index, point):
+                if index in opp_lip:
+                    return False
+                if index in own_lip:
+                    return True
+                side = self._seam_signed_angle(math.atan2(point[1], point[0])) >= 0.0
+                return side == anchor_side
+
         # Select a LOCAL patch within grab_radius of the anchor. Each handle gets
         # a weight that fades from 1 (at the anchor) to 0 (at the radius), so the
         # patch lifts smoothly instead of being yanked into a spike.
@@ -1317,6 +1363,8 @@ class CapsulorhexisController(Sofa.Core.Controller if Sofa else object):
             dz = point[2] - anchor[2]
             distance = math.sqrt(dx * dx + dy * dy + dz * dz)
             if distance <= radius:
+                if seam_keep is not None and not seam_keep(index, point):
+                    continue
                 handles.append(index)
                 orig.append([point[0], point[1], point[2]])
                 weight.append(1.0 - distance / radius)
@@ -1332,7 +1380,10 @@ class CapsulorhexisController(Sofa.Core.Controller if Sofa else object):
                 return dx * dx + dy * dy + dz * dz
 
             count = max(1, min(self.grab_handle_count, len(flap_live)))
-            for index in sorted(range(len(flap_live)), key=flap_distance)[:count]:
+            candidates = sorted(range(len(flap_live)), key=flap_distance)
+            if seam_keep is not None:
+                candidates = [i for i in candidates if seam_keep(i, flap_live[i])] or candidates
+            for index in candidates[:count]:
                 handles.append(index)
                 orig.append([flap_live[index][0], flap_live[index][1], flap_live[index][2]])
                 weight.append(1.0)
@@ -1353,6 +1404,20 @@ class CapsulorhexisController(Sofa.Core.Controller if Sofa else object):
         move_y = anchor[1] - self._grab_anchor0[1]
         move_z = anchor[2] - self._grab_anchor0[2]
         pull = math.sqrt(move_x * move_x + move_y * move_y)
+
+        # Over-stretch -> the tissue slips out of the forceps. Caps how far the
+        # flap can be dragged ("拉得太长") and reads as a slip/tear precursor.
+        if self.grab_max_stretch > 0.0:
+            stretch = math.sqrt(move_x * move_x + move_y * move_y + move_z * move_z)
+            if stretch > self.grab_max_stretch:
+                if self.debug_controls and not self._grab_slipped:
+                    print(f"physics grab slipped: stretch={stretch:.3f} > max={self.grab_max_stretch:.3f}")
+                self._grab_handles = []
+                self._grab_orig = []
+                self._grab_weight = []
+                self._grab_slipped = True
+                return
+
         curl = self.grab_curl
         try:
             with dofs.position.writeable() as positions:

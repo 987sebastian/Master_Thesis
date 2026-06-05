@@ -24,6 +24,7 @@ from .geometry import (
     generate_domed_disk,
     generate_ellipse_curve,
     generate_flap_disk,
+    flap_seam_lips,
     generate_forceps,
     generate_iris_sheet,
     generate_lens_shell,
@@ -145,6 +146,7 @@ def _add_sofa_basics(root, simulation, view_settings):
     root.addObject("RequiredPlugin", name="Sofa.GL.Component.Shader")
     root.addObject("RequiredPlugin", name="Sofa.GL.Component.Rendering3D")
     root.addObject("VisualStyle", displayFlags="showVisualModels showBehaviorModels hideCollisionModels hideMappings")
+    root.addObject("RequiredPlugin", name="Tearing")
     status_label = root.addObject(
         "OglLabel",
         name="capsulorhexis_status_label",
@@ -620,12 +622,28 @@ def createScene(root):
     capsule.addObject("FixedProjectiveConstraint", name="zonular_capsule_anchor", indices=outer_indices)
     capsule.addObject("DiagonalVelocityDampingForceField", dampingCoefficient=profile["materials"]["damping"])
 
-    flap_positions, flap_triangles, _ = generate_flap_disk(
-        geometry["tear_radius"],
-        geometry["flap_rings"],
-        segments,
-        capsule_z + 0.045,
+    flap_seam_enabled = bool(simulation.get("flap_seam", False))
+    flap_physics_enabled = bool(simulation.get("physics_flap", False))
+    flap_seam_angle = math.radians(
+        float(simulation.get("flap_seam_angle_degrees", simulation.get("tear_start_angle_degrees", -105.0)))
     )
+    flap_seam_lip_indices = None
+    if flap_seam_enabled:
+        flap_positions, flap_triangles, flap_boundary = generate_flap_disk(
+            geometry["tear_radius"],
+            geometry["flap_rings"],
+            segments,
+            capsule_z + 0.045,
+            seam_angle=flap_seam_angle,
+        )
+        flap_seam_lip_indices = flap_seam_lips(geometry["flap_rings"], segments)
+    else:
+        flap_positions, flap_triangles, flap_boundary = generate_flap_disk(
+            geometry["tear_radius"],
+            geometry["flap_rings"],
+            segments,
+            capsule_z + 0.045,
+        )
     flap, flap_visual = add_generated_surface(
         anterior_segment,
         "capsular_flap",
@@ -639,6 +657,28 @@ def createScene(root):
         materials=profile["materials"],
     )
     flap.addObject("DiagonalVelocityDampingForceField", dampingCoefficient=profile["materials"]["damping"])
+
+    # Anchor the flap rim so a free FEM disk does not drift, shrink, or bunch up
+    # when a lip is pulled. Only the seam neighbourhood is left free: an arc of
+    # flap_anchor_free_arc_degrees centred on the seam angle stays unpinned so
+    # that lip can lift, while the rest of the rim is fixed. Only active when
+    # both physics_flap and flap_seam are on, so other modes are unchanged.
+    if flap_physics_enabled and flap_seam_enabled and flap_boundary:
+        free_arc = math.radians(float(simulation.get("flap_anchor_free_arc_degrees", 80.0)))
+        half_arc = max(free_arc, 0.0) * 0.5
+        anchored = []
+        for index in flap_boundary:
+            px, py, _pz = flap_positions[index]
+            angle = math.atan2(py, px)
+            delta = angle - flap_seam_angle
+            while delta <= -math.pi:
+                delta += 2.0 * math.pi
+            while delta > math.pi:
+                delta -= 2.0 * math.pi
+            if abs(delta) > half_arc:
+                anchored.append(index)
+        if anchored:
+            flap.addObject("FixedProjectiveConstraint", name="flap_rim_anchor", indices=anchored)
 
     guide_positions, guide_edges = generate_curve(geometry["tear_radius"], segments, z=capsule_z + 0.11)
     _guide, guide_visual = add_curve(anterior_segment, "tear_guide", guide_positions, guide_edges, [1.0, 0.85, 0.22, 1.0])
@@ -660,14 +700,18 @@ def createScene(root):
         tear_progress_edges,
         [0.10, 1.0, 0.42, 0.95],
     )
-    traction_line_positions = [list(tear_progress_start), list(tear_progress_start)]
-    traction_line, traction_line_visual = add_curve(
-        anterior_segment,
-        "forceps_traction_line",
-        traction_line_positions,
-        [[0, 1]],
-        [1.0, 0.74, 0.16, 0.80],
-    )
+    if bool(simulation.get("show_traction_line", True)):
+        traction_line_positions = [list(tear_progress_start), list(tear_progress_start)]
+        traction_line, traction_line_visual = add_curve(
+            anterior_segment,
+            "forceps_traction_line",
+            traction_line_positions,
+            [[0, 1]],
+            [1.0, 0.74, 0.16, 0.80],
+        )
+    else:
+        traction_line = None
+        traction_line_visual = None
 
     forceps_settings = assets.get("forceps_model", {})
     if assets.get("use_external_forceps_model", True):
@@ -740,6 +784,7 @@ def createScene(root):
         traction_line_node=traction_line,
         traction_line_visual=traction_line_visual,
         view_settings=view_settings,
+        flap_seam_lips=flap_seam_lip_indices,
     )
     root.addObject(controller)
     return root

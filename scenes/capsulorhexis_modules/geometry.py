@@ -217,36 +217,102 @@ def generate_capsule_annulus(inner_radius, outer_radius, rings, segments, z=0.0)
     return positions, triangles, inner_boundary
 
 
-def generate_flap_disk(radius, rings, segments, z=0.018):
+def generate_flap_disk(radius, rings, segments, z=0.018, seam_angle=None):
+    """Build the central capsular flap disk.
+
+    When ``seam_angle`` is ``None`` (default) the disk is a closed fan and the
+    output is identical to the original implementation, so existing baselines
+    and callers are unaffected.
+
+    When ``seam_angle`` is given (radians), a single radial slit is pre-cut at
+    that angle: the two lips along the slit get independent vertices (they are
+    coincident at rest, so the slit is invisible until pulled). The disk stays
+    one connected piece via the rest of the circle and is pinned only at the
+    shared centre vertex, which lets the controller lift one lip and open a real
+    separation seam ("plan B'"). Use :func:`flap_seam_lips` to recover the two
+    lips' vertex indices for the same ``rings``/``segments``.
+    """
+    if seam_angle is None:
+        positions = [[0.0, 0.0, z + 0.035]]
+        triangles = []
+
+        for ring in range(1, rings + 1):
+            t = ring / rings
+            r = radius * t
+            for seg in range(segments):
+                angle = 2.0 * math.pi * seg / segments
+                ripple = 0.028 * math.sin(angle * 11.0 + t * 8.0) * (0.4 + 0.6 * t)
+                radial_crease = 0.015 * math.sin(angle * 31.0)
+                positions.append(polar(r, angle, z + ripple + radial_crease))
+
+        first_ring = 1
+        for seg in range(segments):
+            triangles.append([0, first_ring + seg, first_ring + ((seg + 1) % segments)])
+
+        for ring in range(1, rings):
+            row = 1 + (ring - 1) * segments
+            next_row = 1 + ring * segments
+            for seg in range(segments):
+                a = row + seg
+                b = row + ((seg + 1) % segments)
+                c = next_row + seg
+                d = next_row + ((seg + 1) % segments)
+                triangles.append([a, c, d])
+                triangles.append([a, d, b])
+
+        outer_boundary = list(range(1 + (rings - 1) * segments, 1 + rings * segments))
+        return positions, triangles, outer_boundary
+
+    # Seam variant: an "open" disk with segments + 1 angular columns. Column 0
+    # and column `segments` sit at the same angle (seam_angle) but are distinct
+    # vertices, so the strip is NOT wrapped shut -> a radial slit. The trig
+    # ripple terms use integer angular frequencies (11, 31), so adding 2*pi to
+    # the angle leaves them unchanged: the two lips are exactly coincident at
+    # rest and the slit is invisible until a lip is dragged.
+    cols = segments + 1
     positions = [[0.0, 0.0, z + 0.035]]
     triangles = []
 
     for ring in range(1, rings + 1):
         t = ring / rings
         r = radius * t
-        for seg in range(segments):
-            angle = 2.0 * math.pi * seg / segments
+        for col in range(cols):
+            angle = seam_angle + 2.0 * math.pi * col / segments
             ripple = 0.028 * math.sin(angle * 11.0 + t * 8.0) * (0.4 + 0.6 * t)
             radial_crease = 0.015 * math.sin(angle * 31.0)
             positions.append(polar(r, angle, z + ripple + radial_crease))
 
-    first_ring = 1
-    for seg in range(segments):
-        triangles.append([0, first_ring + seg, first_ring + ((seg + 1) % segments)])
+    def idx(ring, col):
+        return 1 + (ring - 1) * cols + col
+
+    for col in range(cols - 1):
+        triangles.append([0, idx(1, col), idx(1, col + 1)])
 
     for ring in range(1, rings):
-        row = 1 + (ring - 1) * segments
-        next_row = 1 + ring * segments
-        for seg in range(segments):
-            a = row + seg
-            b = row + ((seg + 1) % segments)
-            c = next_row + seg
-            d = next_row + ((seg + 1) % segments)
+        for col in range(cols - 1):
+            a = idx(ring, col)
+            b = idx(ring, col + 1)
+            c = idx(ring + 1, col)
+            d = idx(ring + 1, col + 1)
             triangles.append([a, c, d])
             triangles.append([a, d, b])
 
-    outer_boundary = list(range(1 + (rings - 1) * segments, 1 + rings * segments))
+    outer_boundary = [idx(rings, col) for col in range(cols)]
     return positions, triangles, outer_boundary
+
+
+def flap_seam_lips(rings, segments):
+    """Vertex indices of the two slit lips for the seam variant of the flap.
+
+    Lip A is angular column 0 (at the seam angle); lip B is column ``segments``
+    (one full turn later, geometrically coincident with lip A). Indexing is
+    deterministic and must match :func:`generate_flap_disk` with a seam.
+    Returns ``(lip_a_indices, lip_b_indices)``.
+    """
+    cols = segments + 1
+    lip_a = [1 + (ring - 1) * cols + 0 for ring in range(1, rings + 1)]
+    lip_b = [1 + (ring - 1) * cols + segments for ring in range(1, rings + 1)]
+    return lip_a, lip_b
 
 
 def generate_curve(radius, segments, z=0.045):

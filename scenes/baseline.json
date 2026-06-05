@@ -1,0 +1,147 @@
+{
+  "controller_math": {
+    "deltas": [
+      -0.4,
+      0.1,
+      0.45
+    ],
+    "fracs": [
+      0.291667,
+      0.450822,
+      0.132512,
+      0.769131
+    ],
+    "grip": 0.48,
+    "offset": -0.033378,
+    "posed_checksum": "b98d6e0b039c963b",
+    "tip": [
+      -0.16,
+      0.0,
+      0.2
+    ]
+  },
+  "curves": {
+    "curve": {
+      "checksum": "5dd4207150a926c6",
+      "edges": 64,
+      "verts": 64
+    },
+    "ellipse_curve": {
+      "checksum": "54ecd4cc007c78ed",
+      "edges": 64,
+      "verts": 64
+    },
+    "radial_strokes": {
+      "checksum": "e2a0bfba09f55b3e",
+      "edges": 180,
+      "verts": 240
+    },
+    "scleral_vessels": {
+      "checksum": "078112be0b648e64",
+      "edges": 140,
+      "verts": 164
+    },
+    "vitreous_outline": {
+      "checksum": "bcdb4d6d2ded4a0c",
+      "edges": 348,
+      "verts": 288
+    },
+    "zonule_fibers": {
+      "checksum": "f2db00bb95ecd56e",
+      "edges": 144,
+      "verts": 288
+    }
+  },
+  "surfaces": {
+    "annulus": {
+      "checksum": "511ffc0ba9699be3",
+      "tris": 512,
+      "verts": 320
+    },
+    "anterior_chamber": {
+      "checksum": "6abc37412b79a701",
+      "tris": 960,
+      "verts": 513
+    },
+    "capsule_annulus": {
+      "checksum": "b983953d3eb2feaa",
+      "tris": 768,
+      "verts": 448
+    },
+    "capsule_annulus_center": {
+      "checksum": "c2cf4086b50e1906",
+      "tris": 448,
+      "verts": 257
+    },
+    "ciliary_body": {
+      "checksum": "2ab25ab5903eb6b3",
+      "tris": 1280,
+      "verts": 640
+    },
+    "ciliary_processes": {
+      "checksum": "cef6a88c3992b56e",
+      "tris": 144,
+      "verts": 144
+    },
+    "cornea": {
+      "checksum": "ca1689cb78c05605",
+      "tris": 1216,
+      "verts": 641
+    },
+    "cornea_shell": {
+      "checksum": "8c49f1f61ce481ba",
+      "tris": 2048,
+      "verts": 1026
+    },
+    "disk": {
+      "checksum": "fc5532e2c699ca30",
+      "tris": 576,
+      "verts": 321
+    },
+    "domed_disk": {
+      "checksum": "58153b10b7b33765",
+      "tris": 960,
+      "verts": 513
+    },
+    "flap_disk": {
+      "checksum": "21cf3e8382ec8cc7",
+      "tris": 704,
+      "verts": 385
+    },
+    "forceps": {
+      "checksum": "7b8936f1590144ec",
+      "tris": 46,
+      "verts": 44
+    },
+    "iris": {
+      "checksum": "0e04542a98d475fa",
+      "tris": 768,
+      "verts": 448
+    },
+    "iris_sheet": {
+      "checksum": "a22537e9f7662d22",
+      "tris": 1792,
+      "verts": 896
+    },
+    "lens_shell": {
+      "checksum": "2a7d953b061a3c46",
+      "tris": 2560,
+      "verts": 1282
+    },
+    "sclera": {
+      "checksum": "59a714d9a526dbe5",
+      "tris": 768,
+      "verts": 448
+    },
+    "sclera_shell": {
+      "checksum": "c8d3f16a5647c13a",
+      "tris": 1024,
+      "verts": 576
+    },
+    "vessel_ribbons": {
+      "checksum": "e6e958013d7695f1",
+      "tris": 428,
+      "verts": 492
+    }
+  }
+}
